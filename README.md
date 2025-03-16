@@ -1,8 +1,3 @@
-Below is an example **README.md** file for your repository:
-
----
-
-```markdown
 # GPU Setup Script
 
 This repository contains a shell script that automates the installation of key GPU-related software components on Ubuntu 24 servers (e.g., from Hetzner). The script installs:

@@ -1,0 +1,64 @@
+name: Deploy New Servers
+
+on:
+  push:
+    branches:
+      - main   # Adjust as needed
+
+jobs:
+  deploy-new-servers:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install sshpass
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Set repository URL environment variable
+        run: echo "REPO_URL=https://github.com/${{ github.repository }}.git" >> $GITHUB_ENV
+
+      - name: Deploy only to newly added servers
+        run: |
+          # Get the diff of new_servers.csv between the previous and current commit.
+          # This filters only lines starting with '+' (new lines) and ignores diff metadata.
+          NEW_LINES=$(git diff HEAD~1 HEAD -- new_servers.csv | grep '^+' | grep -v '^+++')
+          
+          if [ -z "$NEW_LINES" ]; then
+            echo "No new changes detected in new_servers.csv. Nothing to deploy."
+            exit 0
+          fi
+
+          # Optionally, if your CSV always has a header line that is also added in the diff,
+          # remove the header. Here, we assume the header is the first new line.
+          # Save the new lines (minus header) into a temporary file.
+          echo "$NEW_LINES" | sed 's/^+//' | tail -n +2 > new_servers_diff.csv
+
+          if [ ! -s new_servers_diff.csv ]; then
+            echo "No new server entries found after skipping header."
+            exit 0
+          fi
+
+          echo "New server entries:"
+          cat new_servers_diff.csv
+
+          # Loop over each new server entry.
+          while IFS=',' read -r server_user server_ip server_pass; do
+            echo "Deploying to $server_ip as $server_user"
+            sshpass -p "$server_pass" ssh -o StrictHostKeyChecking=no $server_user@$server_ip <<EOF
+              set -e
+              # Remove any previous server_setup directory
+              rm -rf server_setup
+              # Clone the updated repository using the REPO_URL passed from the workflow environment
+              git clone "$REPO_URL" server_setup
+              cd server_setup
+              # Make all shell scripts executable
+              chmod +x *.sh
+              # Run the setup script first, then start services and update as needed
+              ./setup_and_run_with_checks.sh
+              ./runner.sh
+              ./updater.sh
+              ./nlu_update.sh
+EOF
+          done < new_servers_diff.csv
